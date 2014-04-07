@@ -62,6 +62,8 @@
     <uses-permission android:name="com.qti.permission.DIAG" />
     <uses-permission android:name="com.qti.permission.IMS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Allow disable Statusbar -->
+    <uses-permission android:name="android.permission.STATUS_BAR" />
 
     <application
         android:name="DialerApplication"
