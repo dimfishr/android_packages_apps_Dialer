@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Xiao-Long Chen <chillermillerlong@hotmail.com>
+ * Copyright (C) 2014 Xiao-Long Chen <chenxiaolong@cxl.epac.to>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,8 +16,6 @@
 
 package com.android.dialer.lookup.google;
 
-import com.android.dialer.calllog.ContactInfo;
-import com.android.dialer.lookup.ContactBuilder;
 import com.android.dialer.lookup.ForwardLookup;
 
 import android.content.Context;
@@ -25,9 +23,6 @@ import android.content.pm.PackageManager;
 import android.location.Location;
 import android.net.Uri;
 import android.os.Build;
-import android.provider.ContactsContract.CommonDataKinds.Phone;
-import android.provider.ContactsContract.CommonDataKinds.StructuredPostal;
-import android.provider.ContactsContract.CommonDataKinds.Website;
 import android.text.Html;
 import android.util.Log;
 
@@ -95,7 +90,7 @@ public class GoogleForwardLookup extends ForwardLookup {
     }
 
     @Override
-    public ContactInfo[] lookup(Context context,
+    public ForwardLookupDetails[] lookup(Context context,
             String filter, Location lastLocation) {
         int length = filter.length();
 
@@ -105,7 +100,8 @@ public class GoogleForwardLookup extends ForwardLookup {
             }
 
             try {
-                Uri.Builder builder = Uri.parse(LOOKUP_URL).buildUpon();
+                Uri.Builder builder = Uri.parse(
+                        rewriteUrl(context, LOOKUP_URL)).buildUpon();
 
                 // Query string
                 builder = builder.appendQueryParameter(QUERY_FILTER, filter);
@@ -148,19 +144,21 @@ public class GoogleForwardLookup extends ForwardLookup {
     }
 
     /**
-     * Parse JSON results and return them as an array of ContactInfo
+     * Parse JSON results and return them as an array of ForwardLookupDetails
      *
      * @param results The JSON results returned from the server
-     * @return Array of ContactInfo containing the result information
+     * @return Array of ForwardLookupDetails containing the result information
      */
-    private ContactInfo[] getEntries(JSONArray results)
+    private ForwardLookupDetails[] getEntries(JSONArray results)
             throws JSONException {
-        ArrayList<ContactInfo> details =
-                new ArrayList<ContactInfo>();
+        ArrayList<ForwardLookupDetails> details =
+                new ArrayList<ForwardLookupDetails>();
 
         JSONArray entries = results.getJSONArray(1);
 
         for (int i = 0; i < entries.length(); i++) {
+            ForwardLookupDetails fld = new ForwardLookupDetails();
+
             try {
                 JSONArray entry = entries.getJSONArray(i);
 
@@ -171,52 +169,54 @@ public class GoogleForwardLookup extends ForwardLookup {
                 String phoneNumber = decodeHtml(
                         params.getString(RESULT_NUMBER));
 
-                String address = decodeHtml(params.getString(RESULT_ADDRESS));
-                String city = decodeHtml(params.getString(RESULT_CITY));
+                // Google uses the city instead of the address
+                //String address = decodeHtml(params.getString(RESULT_ADDRESS));
+                String address = decodeHtml(params.getString(RESULT_CITY));
 
                 String profileUrl = params.optString(RESULT_WEBSITE, null);
                 String photoUri = params.optString(RESULT_PHOTO_URI, null);
 
-                ContactBuilder builder = new ContactBuilder(
-                        ContactBuilder.FORWARD_LOOKUP, null, phoneNumber);
+                String distance = params.optString(RESULT_DISTANCE, null);
 
-                ContactBuilder.Name n = new ContactBuilder.Name();
-                n.displayName = displayName;
-                builder.setName(n);
+                fld.setDisplayName(displayName);
+                fld.setPhoneNumber(phoneNumber);
+                fld.setAddress(address);
+                fld.setWebsite(profileUrl);
+                fld.setPhotoUri(photoUri);
+                fld.setDistance(distance);
 
-                ContactBuilder.PhoneNumber pn = new ContactBuilder.PhoneNumber();
-                pn.number = phoneNumber;
-                pn.type = Phone.TYPE_MAIN;
-                builder.addPhoneNumber(pn);
-
-                ContactBuilder.Address a = new ContactBuilder.Address();
-                a.formattedAddress = address;
-                a.city = city;
-                a.type = StructuredPostal.TYPE_WORK;
-                builder.addAddress(a);
-
-                ContactBuilder.WebsiteUrl w = new ContactBuilder.WebsiteUrl();
-                w.url = profileUrl;
-                w.type = Website.TYPE_PROFILE;
-                builder.addWebsite(w);
-
-                if (photoUri != null) {
-                    builder.setPhotoUri(photoUri);
-                } else {
-                    builder.setPhotoUri(ContactBuilder.PHOTO_URI_BUSINESS);
-                }
-
-                details.add(builder.build());
+                details.add(fld);
             } catch (JSONException e) {
                 Log.e(TAG, "Skipping the suggestions at index " + i, e);
             }
         }
 
         if (details.size() > 0) {
-            return details.toArray(new ContactInfo[details.size()]);
+            return details.toArray(new ForwardLookupDetails[details.size()]);
         } else {
             return null;
         }
+    }
+
+    /**
+     * Rewrite URL (eg. if a website has been moved)
+     *
+     * @param context A valid context
+     * @param url Original URL
+     * @return New URL
+     */
+    private String rewriteUrl(Context context, String url) throws IOException {
+        UrlRules.Rule rule = UrlRules.getRules(
+                context.getContentResolver()).matchRule(url);
+        String newUrl = rule.apply(url);
+
+        if (newUrl == null) {
+            if (DEBUG) Log.w(TAG, "Blocked by " + rule.mName + ": " + url);
+            throw new IOException("Blocked by rule: " + rule.mName);
+        }
+
+        if (DEBUG) Log.v(TAG, "Rule " + rule.mName + ": " + url + " -> " + newUrl);
+        return newUrl;
     }
 
     /**
