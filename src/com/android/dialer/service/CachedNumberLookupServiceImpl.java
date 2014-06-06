@@ -235,6 +235,11 @@ public class CachedNumberLookupServiceImpl implements CachedNumberLookupService 
     }
 
     @Override
+    public boolean isBusiness(int type) {
+        return type == SOURCE_BUSINESS || type == SOURCE_EXTENDED;
+    }
+
+    @Override
     public boolean addPhoto(Context context, String number, byte[] photo) {
         Uri uri = PhoneNumberCacheContract.getPhotoLookupUri(number);
         OutputStream out = null;
