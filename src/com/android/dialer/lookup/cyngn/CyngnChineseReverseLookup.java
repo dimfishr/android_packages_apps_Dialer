@@ -22,6 +22,7 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.provider.ContactsContract;
 import android.util.Log;
+import android.util.Pair;
 import com.android.dialer.calllog.ContactInfo;
 import com.android.dialer.lookup.ContactBuilder;
 import com.android.dialer.lookup.ReverseLookup;
@@ -35,8 +36,6 @@ public class CyngnChineseReverseLookup extends ReverseLookup {
     private static final int COMMON_CHINESE_PHONE_NUMBER_AREANO_END = 5;
 
     private static final boolean DEBUG = false;
-    private static final Uri PROVIDER_URI =
-            Uri.parse("content://com.cyngn.chineselocationlookup.provider");
 
     public CyngnChineseReverseLookup(Context context) {
     }
@@ -49,9 +48,12 @@ public class CyngnChineseReverseLookup extends ReverseLookup {
      * @param formattedNumber  The formatted phone number
      * @return The phone number info object
      */
-    public ContactInfo lookupNumber(Context context,
-            String normalizedNumber, String formattedNumber) {
-        String displayName = queryProvider(context, normalizedNumber);
+    public Pair<ContactInfo, Object> lookupNumber(Context context,
+                                                  String normalizedNumber, String formattedNumber) {
+        String displayName;
+
+        displayName = queryProvider(context, normalizedNumber);
+
         if (displayName == null) {
             return null;
         }
@@ -64,11 +66,19 @@ public class CyngnChineseReverseLookup extends ReverseLookup {
         ContactBuilder builder = new ContactBuilder(
                 ContactBuilder.REVERSE_LOOKUP,
                 normalizedNumber, formattedNumber);
-        builder.setName(ContactBuilder.Name.createDisplayName(displayName));
-        builder.addPhoneNumber(ContactBuilder.PhoneNumber.createMainNumber(number));
+
+        ContactBuilder.Name n = new ContactBuilder.Name();
+        n.displayName = displayName;
+        builder.setName(n);
+
+        ContactBuilder.PhoneNumber pn = new ContactBuilder.PhoneNumber();
+        pn.number = number;
+        pn.type = ContactsContract.CommonDataKinds.Phone.TYPE_MAIN;
+        builder.addPhoneNumber(pn);
+
         builder.setPhotoUri(ContactBuilder.PHOTO_URI_BUSINESS);
 
-        return builder.build();
+        return Pair.create(builder.build(), null);
     }
 
     private String queryProvider(Context context, String normalizedNumber) {
@@ -81,19 +91,20 @@ public class CyngnChineseReverseLookup extends ReverseLookup {
                 COMMON_CHINESE_PHONE_NUMBER_AREANO_END);
 
         ContentResolver resolver = context.getContentResolver();
-        Cursor cursor = context.getContentResolver().query(PROVIDER_URI,
+        Cursor cursor = resolver.query(Uri.parse("content://com.cyngn.chineselocationlookup.provider"),
                 null, null, new String[] { areaPrefix }, null);
-        if (cursor == null) {
-            return null;
-        }
+
+        String city = null;
 
         try {
             if (cursor.moveToFirst()) {
-                return cursor.getString(2);
+                city = cursor.getString(2);
             }
+        } catch (NullPointerException e) {
+            return null;
         } finally {
             cursor.close();
+            return city;
         }
-        return null;
     }
 }

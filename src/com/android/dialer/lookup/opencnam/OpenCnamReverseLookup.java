@@ -16,19 +16,26 @@
 
 package com.android.dialer.lookup.opencnam;
 
+import com.android.dialer.calllog.ContactInfo;
+import com.android.dialer.lookup.ContactBuilder;
+import com.android.dialer.lookup.ReverseLookup;
+
 import android.content.Context;
 import android.net.Uri;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.Log;
+import android.util.Pair;
 
-import com.android.dialer.calllog.ContactInfo;
-import com.android.dialer.lookup.ContactBuilder;
-import com.android.dialer.lookup.LookupUtils;
-import com.android.dialer.lookup.ReverseLookup;
+import android.provider.ContactsContract.CommonDataKinds.Phone;
 
+import org.apache.http.HttpStatus;
+import org.apache.http.HttpResponse;
+import org.apache.http.client.HttpClient;
 import org.apache.http.client.methods.HttpGet;
+import org.apache.http.impl.client.DefaultHttpClient;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 
 public class OpenCnamReverseLookup extends ReverseLookup {
@@ -55,15 +62,20 @@ public class OpenCnamReverseLookup extends ReverseLookup {
      * @param formattedNumber The formatted phone number
      * @return The phone number info object
      */
-    public ContactInfo lookupNumber(Context context,
-            String normalizedNumber, String formattedNumber) throws IOException {
+    public Pair<ContactInfo, Object> lookupNumber(Context context,
+            String normalizedNumber, String formattedNumber) {
+        String displayName;
+
         if (normalizedNumber.startsWith("+") &&!normalizedNumber.startsWith("+1")) {
             // Any non-US number will return "We currently accept only US numbers"
             return null;
         }
-
-        String displayName = httpGetRequest(context, normalizedNumber);
-        if (DEBUG) Log.d(TAG, "Reverse lookup returned name: " + displayName);
+        try {
+            displayName = httpGetRequest(context, normalizedNumber);
+            if (DEBUG) Log.d(TAG, "Reverse lookup returned name: " + displayName);
+        } catch (IOException e) {
+            return null;
+        }
 
         // Check displayName. The free tier of the service will return the
         // following for some numbers:
@@ -79,11 +91,19 @@ public class OpenCnamReverseLookup extends ReverseLookup {
         ContactBuilder builder = new ContactBuilder(
                 ContactBuilder.REVERSE_LOOKUP,
                 normalizedNumber, formattedNumber);
-        builder.setName(ContactBuilder.Name.createDisplayName(displayName));
-        builder.addPhoneNumber(ContactBuilder.PhoneNumber.createMainNumber(number));
+
+        ContactBuilder.Name n = new ContactBuilder.Name();
+        n.displayName = displayName;
+        builder.setName(n);
+
+        ContactBuilder.PhoneNumber pn = new ContactBuilder.PhoneNumber();
+        pn.number = number;
+        pn.type = Phone.TYPE_MAIN;
+        builder.addPhoneNumber(pn);
+
         builder.setPhotoUri(ContactBuilder.PHOTO_URI_BUSINESS);
 
-        return builder.build();
+        return Pair.create(builder.build(), null);
     }
 
     private String httpGetRequest(Context context, String number) throws IOException {
@@ -104,6 +124,20 @@ public class OpenCnamReverseLookup extends ReverseLookup {
             builder.appendQueryParameter(AUTH_TOKEN, authToken);
         }
 
-        return LookupUtils.httpGet(new HttpGet(builder.build().toString()));
+        String url = builder.build().toString();
+
+        HttpClient client = new DefaultHttpClient();
+        HttpGet request = new HttpGet(url);
+
+        HttpResponse response = client.execute(request);
+
+        if (response.getStatusLine().getStatusCode() != HttpStatus.SC_OK) {
+            throw new IOException();
+        }
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        response.getEntity().writeTo(out);
+
+        return new String(out.toByteArray());
     }
 }

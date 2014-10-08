@@ -21,6 +21,12 @@ import com.android.dialer.lookup.ContactBuilder;
 import com.android.dialer.lookup.ReverseLookup;
 
 import android.content.Context;
+import android.net.Uri;
+import android.util.Pair;
+
+import android.provider.ContactsContract.CommonDataKinds.Phone;
+import android.provider.ContactsContract.CommonDataKinds.StructuredPostal;
+import android.provider.ContactsContract.CommonDataKinds.Website;
 
 import java.io.IOException;
 
@@ -39,9 +45,16 @@ public class WhitePagesReverseLookup extends ReverseLookup {
      * @param formattedNumber The formatted phone number
      * @return The phone number info object
      */
-    public ContactInfo lookupNumber(Context context,
-            String normalizedNumber, String formattedNumber) throws IOException {
-        WhitePagesApi.ContactInfo info = WhitePagesApi.reverseLookup(context, normalizedNumber);
+    public Pair<ContactInfo, Object> lookupNumber(Context context,
+            String normalizedNumber, String formattedNumber) {
+        WhitePagesApi.ContactInfo info = null;
+
+        try {
+            info = WhitePagesApi.reverseLookup(context, normalizedNumber);
+        } catch (IOException e) {
+            return null;
+        }
+
         if (info == null || info.name == null) {
             return null;
         }
@@ -50,13 +63,27 @@ public class WhitePagesReverseLookup extends ReverseLookup {
                 ContactBuilder.REVERSE_LOOKUP,
                 normalizedNumber, formattedNumber);
 
-        builder.setName(ContactBuilder.Name.createDisplayName(info.name));
-        builder.addPhoneNumber(ContactBuilder.PhoneNumber.createMainNumber(info.formattedNumber));
-        builder.addWebsite(ContactBuilder.WebsiteUrl.createProfile(info.website));
+        ContactBuilder.Name n = new ContactBuilder.Name();
+        n.displayName = info.name;
+        builder.setName(n);
+
+        ContactBuilder.PhoneNumber pn = new ContactBuilder.PhoneNumber();
+        pn.number = info.formattedNumber;
+        pn.type = Phone.TYPE_MAIN;
+        builder.addPhoneNumber(pn);
+
         if (info.address != null) {
-            builder.addAddress(ContactBuilder.Address.createFormattedHome(info.address));
+            ContactBuilder.Address a = new ContactBuilder.Address();
+            a.formattedAddress = info.address;
+            a.type = StructuredPostal.TYPE_HOME;
+            builder.addAddress(a);
         }
 
-        return builder.build();
+        ContactBuilder.WebsiteUrl w = new ContactBuilder.WebsiteUrl();
+        w.url = info.website;
+        w.type = Website.TYPE_PROFILE;
+        builder.addWebsite(w);
+
+        return Pair.create(builder.build(), null);
     }
 }

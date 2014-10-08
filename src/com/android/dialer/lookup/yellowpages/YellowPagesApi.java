@@ -16,17 +16,24 @@
 
 package com.android.dialer.lookup.yellowpages;
 
-import android.content.Context;
-import android.text.TextUtils;
-
 import com.android.dialer.lookup.LookupSettings;
-import com.android.dialer.lookup.LookupUtils;
 
-import org.apache.http.client.methods.HttpGet;
+import android.content.Context;
+import android.text.Html;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import org.apache.http.Header;
+import org.apache.http.HttpResponse;
+import org.apache.http.HttpStatus;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.impl.client.DefaultHttpClient;
 
 public class YellowPagesApi {
     private static final String TAG = YellowPagesApi.class.getSimpleName();
@@ -54,33 +61,81 @@ public class YellowPagesApi {
     }
 
     private void fetchPage() throws IOException {
-        mOutput = LookupUtils.httpGet(new HttpGet(mLookupUrl + mNumber));
+        mOutput = httpGet(mLookupUrl + mNumber);
+    }
+
+    private String httpGet(String url) throws IOException {
+        HttpClient client = new DefaultHttpClient();
+        HttpGet get = new HttpGet(url);
+
+        HttpResponse response = client.execute(get);
+        int status = response.getStatusLine().getStatusCode();
+
+        // Android's org.apache.http doesn't have the RedirectStrategy class
+        if (status == HttpStatus.SC_MOVED_PERMANENTLY
+                || status == HttpStatus.SC_MOVED_TEMPORARILY) {
+            Header[] headers = response.getHeaders("Location");
+
+            if (headers != null && headers.length != 0) {
+                String newUrl = headers[headers.length - 1].getValue();
+                return httpGet(newUrl);
+            } else {
+                return null;
+            }
+        }
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        response.getEntity().writeTo(out);
+
+        return new String(out.toByteArray());
     }
 
     private String getPhotoUrl(String website) throws IOException {
-        String output = LookupUtils.httpGet(new HttpGet(website));
-        String galleryRef = LookupUtils.firstRegexResult(output,
-                "href=\"([^\"]+gallery\\?lid=[^\"]+)\"", true);
-        if (galleryRef == null) {
+        String output = httpGet(website);
+
+        Matcher m;
+
+        Pattern regexGallery = Pattern.compile(
+                "href=\"([^\"]+gallery\\?lid=[^\"]+)\"", Pattern.DOTALL);
+
+        String galleryUrl = null;
+
+        m = regexGallery.matcher(output);
+        if (m.find()) {
+            galleryUrl = "http://www.yellowpages.com" + m.group(1).trim();
+        }
+
+        if (galleryUrl == null) {
             return null;
         }
 
         // Get first image
-        HttpGet get = new HttpGet("http://www.yellowpages.com" + galleryRef);
-        output = LookupUtils.httpGet(get);
 
-        return LookupUtils.firstRegexResult(output,
-                "\"type\":\"image\",\"src\":\"([^\"]+)\"", true);
+        output = httpGet(galleryUrl);
+
+        Pattern regexPhoto = Pattern.compile(
+                "\"type\":\"image\",\"src\":\"([^\"]+)\"", Pattern.DOTALL);
+
+        String photoUrl = null;
+
+        m = regexPhoto.matcher(output);
+        if (m.find()) {
+            photoUrl = m.group(1).trim();
+        }
+
+        return photoUrl;
     }
 
     private String[] parseNameWebsiteUnitedStates() {
+        Matcher m;
+
         Pattern regexNameAndWebsite = Pattern.compile(
                 "<a href=\"([^>]+?)\"[^>]+?class=\"url[^>]+?>([^<]+)</a>",
                 Pattern.DOTALL);
         String name = null;
         String website = null;
 
-        Matcher m = regexNameAndWebsite.matcher(mOutput);
+        m = regexNameAndWebsite.matcher(mOutput);
         if (m.find()) {
             website = m.group(1).trim();
             name = m.group(2).trim();
@@ -90,6 +145,8 @@ public class YellowPagesApi {
     }
 
     private String[] parseNameWebsiteCanada() {
+        Matcher m;
+
         Pattern regexNameAndWebsite = Pattern.compile(
                 "class=\"ypgListingTitleLink utagLink\".*?href=\"(.*?)\">"
                         + "(<span\\s+class=\"listingTitle\">.*?</span>)",
@@ -97,10 +154,14 @@ public class YellowPagesApi {
         String name = null;
         String website = null;
 
-        Matcher m = regexNameAndWebsite.matcher(mOutput);
+        m = regexNameAndWebsite.matcher(mOutput);
         if (m.find()) {
             website = m.group(1).trim();
-            name = LookupUtils.fromHtml(m.group(2).trim());
+            name = m.group(2).trim();
+        }
+
+        if (name != null) {
+            name = Html.fromHtml(name).toString().trim();
         }
 
         if (website != null) {
@@ -111,43 +172,90 @@ public class YellowPagesApi {
     }
 
     private String parseNumberUnitedStates() {
-        return LookupUtils.firstRegexResult(mOutput,
-                "business-phone.*?>\n*([^\n<]+)\n*<", true);
+        Matcher m;
+
+        Pattern regexPhoneNumber = Pattern.compile(
+                "business-phone.*?>\n*([^\n<]+)\n*<", Pattern.DOTALL);
+        String phoneNumber = null;
+
+        m = regexPhoneNumber.matcher(mOutput);
+        if (m.find()) {
+            phoneNumber = m.group(1).trim();
+        }
+
+        return phoneNumber;
     }
 
     private String parseNumberCanada() {
-        return LookupUtils.firstRegexResult(mOutput,
-                "<div\\s+class=\"phoneNumber\">(.*?)</div>", true);
+        Matcher m;
+
+        Pattern regexPhoneNumber = Pattern.compile(
+                "<div\\s+class=\"phoneNumber\">(.*?)</div>", Pattern.DOTALL);
+        String phoneNumber = null;
+
+        m = regexPhoneNumber.matcher(mOutput);
+        if (m.find()) {
+            phoneNumber = m.group(1).trim();
+        }
+
+        return phoneNumber;
     }
 
     private String parseAddressUnitedStates() {
-        String addressStreet = LookupUtils.firstRegexResult(mOutput,
-                "street-address.*?>\n*([^\n<]+)\n*<", true);
-        if (addressStreet != null && addressStreet.endsWith(",")) {
-            addressStreet = addressStreet.substring(0, addressStreet.length() - 1);
+        Matcher m;
+
+        Pattern regexAddressStreet = Pattern.compile(
+                "street-address.*?>\n*([^\n<]+)\n*<", Pattern.DOTALL);
+        Pattern regexAddressCity = Pattern.compile(
+                "locality.*?>\n*([^\n<]+)\n*<", Pattern.DOTALL);
+        Pattern regexAddressState = Pattern.compile(
+                "region.*?>\n*([^\n<]+)\n*<", Pattern.DOTALL);
+        Pattern regexAddressZip = Pattern.compile(
+                "postal-code.*?>\n*([^\n<]+)\n*<", Pattern.DOTALL);
+
+        String addressStreet = null;
+        String addressCity = null;
+        String addressState = null;
+        String addressZip = null;
+
+        m = regexAddressStreet.matcher(mOutput);
+        if (m.find()) {
+            addressStreet = m.group(1).trim();
+            if (addressStreet.endsWith(",")) {
+                addressStreet = addressStreet.substring(0,
+                        addressStreet.length() - 1);
+            }
         }
 
-        String addressCity = LookupUtils.firstRegexResult(mOutput,
-                "locality.*?>\n*([^\n<]+)\n*<", true);
-        String addressState = LookupUtils.firstRegexResult(mOutput,
-                "region.*?>\n*([^\n<]+)\n*<", true);
-        String addressZip = LookupUtils.firstRegexResult(mOutput,
-                "postal-code.*?>\n*([^\n<]+)\n*<", true);
+        m = regexAddressCity.matcher(mOutput);
+        if (m.find()) {
+            addressCity = m.group(1).trim();
+        }
+
+        m = regexAddressState.matcher(mOutput);
+        if (m.find()) {
+            addressState = m.group(1).trim();
+        }
+
+        m = regexAddressZip.matcher(mOutput);
+        if (m.find()) {
+            addressZip = m.group(1).trim();
+        }
 
         StringBuilder sb = new StringBuilder();
 
-        if (!TextUtils.isEmpty(addressStreet)) {
+        if (addressStreet != null && addressStreet.length() != 0) {
             sb.append(addressStreet);
         }
-        if (!TextUtils.isEmpty(addressCity)) {
+        if (addressCity != null && addressCity.length() != 0) {
             sb.append(", ");
             sb.append(addressCity);
         }
-        if (!TextUtils.isEmpty(addressState)) {
+        if (addressState != null && addressState.length() != 0) {
             sb.append(", ");
             sb.append(addressState);
         }
-        if (!TextUtils.isEmpty(addressZip)) {
+        if (addressZip != null && addressZip.length() != 0) {
             sb.append(", ");
             sb.append(addressZip);
         }
@@ -161,9 +269,22 @@ public class YellowPagesApi {
     }
 
     private String parseAddressCanada() {
-        String address = LookupUtils.firstRegexResult(mOutput,
-                "<div\\s+class=\"address\">(.*?)</div>", true);
-        return LookupUtils.fromHtml(address);
+        Matcher m;
+
+        Pattern regexAddress = Pattern.compile(
+                "<div\\s+class=\"address\">(.*?)</div>", Pattern.DOTALL);
+        String address = null;
+
+        m = regexAddress.matcher(mOutput);
+        if (m.find()) {
+            address = m.group(1).trim();
+        }
+
+        if (address != null) {
+            address = Html.fromHtml(address).toString().trim();
+        }
+
+        return address;
     }
 
     private void buildContactInfo() throws IOException {
