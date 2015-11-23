@@ -92,12 +92,12 @@ public class SmartDialPrefix {
 
     private static final Map<String, SmartDialMap> countryToSmartDialMap = new HashMap<String, SmartDialMap>();
     static {
-        languageToSmartDialMap.put("KR", new KoreanSmartDialMap());
-        languageToSmartDialMap.put("GR", new GreekSmartDialMap());
-        languageToSmartDialMap.put("RU", new RussianSmartDialMap());
-        languageToSmartDialMap.put("UA", new UkrainianSmartDialMap());
-        languageToSmartDialMap.put("IL", new HebrewSmartDialMap());
-        languageToSmartDialMap.put("CN", new ChineseSmartDialMap());
+        countryToSmartDialMap.put("KR", new KoreanSmartDialMap());
+        countryToSmartDialMap.put("GR", new GreekSmartDialMap());
+        countryToSmartDialMap.put("RU", new RussianSmartDialMap());
+        countryToSmartDialMap.put("UA", new UkrainianSmartDialMap());
+        countryToSmartDialMap.put("IL", new HebrewSmartDialMap());
+        countryToSmartDialMap.put("CN", new ChineseSmartDialMap());
     }
 
     /** Initializes the Nanp settings, and finds out whether user is in a NANP region.*/
@@ -121,11 +121,11 @@ public class SmartDialPrefix {
         /** Queries the NANP country list to find out whether user is in a NANP region.*/
         sUserInNanpRegion = isCountryNanp(sUserSimCountryCode);
 
-        /** Sets a layout for SmartDial based on locale.  Lookup by language first and fallback to country */
+        /** Sets a layout for SmartDial based on locale.  Lookup by country first and fallback to language */
         Locale locale = SettingsUtil.getT9SearchInputLocale(context);
-        mMap = languageToSmartDialMap.get(locale.getLanguage());
+        mMap = countryToSmartDialMap.get(locale.getCountry());
         if (mMap == null)
-            mMap = countryToSmartDialMap.get(locale.getCountry());
+            mMap = languageToSmartDialMap.get(locale.getLanguage());
         if (mMap == null)
             mMap = new LatinSmartDialMap();
 
